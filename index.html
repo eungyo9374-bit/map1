@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>제주 날씨 맞춤 추천</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <style>
+        body { margin: 0; font-family: sans-serif; }
+        #bar { display: flex; gap: 8px; padding: 10px; }
+        #q { flex: 1; padding: 8px; font-size: 16px; }
+        #steps { margin: 0 10px; padding: 8px 12px; background: #f3f5f8; border-radius: 8px; font-size: 13px; color: #445; display: none; }
+        #steps div { padding: 2px 0; word-break: break-all; }
+        #answer { padding: 10px; white-space: pre-wrap; line-height: 1.5; }
+        #map { height: 55vh; }
+    </style>
+</head>
+<body>
+    <div id="bar">
+        <input id="q" placeholder="예: 내일 서귀포 가는데 비 오면 어디 가지? / 어디가 좋아?">
+        <button id="go">추천</button>
+    </div>
+    <div id="steps"></div>
+    <div id="answer">자유롭게 물어보세요. Gemini가 날씨(get_weather)와 장소(find_spots) 도구를 스스로 골라 추천합니다.</div>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // OpenStreetMap 타일 지도 (제주 중심)
+        const map = L.map("map").setView([33.38, 126.55], 10)
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" }).addTo(map)
+        const layer = L.layerGroup().addTo(map)
+        const stepsBox = document.getElementById("steps")
+        const answer = document.getElementById("answer")
+
+        const run = async () => {
+            const message = document.getElementById("q").value.trim()
+            if (!message) return
+            layer.clearLayers()
+            stepsBox.style.display = "none"
+            answer.textContent = "Gemini가 도구를 고르는 중..."
+            try {
+                // 키는 서버(/api/agent)에만 있다.
+                const r = await fetch("/api/agent", {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ message }),
+                })
+                const data = await r.json()
+                if (!r.ok) throw new Error(data.error || "오류가 발생했습니다.")
+
+                // 에이전트가 호출한 도구 기록
+                stepsBox.textContent = ""
+                for (const s of data.steps) {
+                    const d = document.createElement("div")
+                    d.textContent = "🔧 " + s
+                    stepsBox.appendChild(d)
+                }
+                stepsBox.style.display = data.steps.length ? "block" : "none"
+
+                answer.textContent = data.reply
+                const points = []
+                for (const s of data.spots) {
+                    const box = document.createElement("div")
+                    box.textContent = `${s.name} · ${s.area} · ${s.indoor ? "실내" : "야외"}\n${s.desc}`
+                    box.style.whiteSpace = "pre-line"
+                    L.marker([s.lat, s.lon]).addTo(layer).bindPopup(box)
+                    points.push([s.lat, s.lon])
+                }
+                if (points.length) map.fitBounds(points, { padding: [40, 40], maxZoom: 13 })
+            } catch (e) {
+                answer.textContent = e.message
+            }
+        }
+        document.getElementById("go").onclick = run
+        document.getElementById("q").onkeydown = (e) => { if (e.key === "Enter") run() }
+    </script>
+</body>
+</html>
